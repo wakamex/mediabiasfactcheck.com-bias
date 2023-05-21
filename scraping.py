@@ -37,10 +37,12 @@ def is_good_response(resp):
     """
     Returns True if the response seems to be HTML, False otherwise.
     """
-    content_type = resp.headers['Content-Type'].lower()
-    return (resp.status_code == 200
-            and content_type is not None
-            and content_type.find('html') > -1)
+    content_type = resp.headers["Content-Type"].lower()
+    return (
+        resp.status_code == 200
+        and content_type is not None
+        and content_type.find("html") > -1
+    )
 
 
 def get_pages() -> List[str]:
@@ -48,22 +50,33 @@ def get_pages() -> List[str]:
     Gets all known media pages from the category pages specified in the function.
     :return: The media pages to be scraped.
     """
-    sources = ['https://mediabiasfactcheck.com/fake-news/', 'https://mediabiasfactcheck.com/left/',
-               'https://mediabiasfactcheck.com/leftcenter/', 'https://mediabiasfactcheck.com/center/',
-               'https://mediabiasfactcheck.com/right-center/', 'https://mediabiasfactcheck.com/right/']
+    sources = [
+        # "https://mediabiasfactcheck.com/fake-news/",
+        "https://mediabiasfactcheck.com/left/",
+        "https://mediabiasfactcheck.com/leftcenter/",
+        "https://mediabiasfactcheck.com/center/",
+        "https://mediabiasfactcheck.com/right-center/",
+        "https://mediabiasfactcheck.com/right/",
+        # "https://mediabiasfactcheck.com/conspiracy/",
+        # "https://mediabiasfactcheck.com/pro-science/",
+    ]
     pages: List[str] = []
 
     for source in sources:
-        print('# # # # # # # # # # # # # #')
-        print('Finding pages in this category:')
+        print("# # # # # # # # # # # # # #")
+        print("Finding pages in this category:")
         print(source)
-        print('# # # # # # # # # # # # # #')
+        print("# # # # # # # # # # # # # #")
         raw_html = simple_get(source)
-        bs = BeautifulSoup(raw_html, 'html.parser')
-        links = bs.find('p', attrs={'style': 'text-align: center;'})
-        for a in links.select('a'):
-            print(a['href'])
-            pages.append(a['href'])
+        bs = BeautifulSoup(raw_html, "html.parser")
+
+        # find table with the id mbfc-table
+        table = bs.find("table", attrs={"id": "mbfc-table"})
+
+        # find every link in the table
+        for a in table.select("a"):
+            print(a["href"])
+            pages.append(a["href"])
         print()
 
     return pages
@@ -86,76 +99,111 @@ def scrape_source(url: str) -> Source:
         raw_html = simple_get(url)
     except HTTPError as e:
         raise NotANewsSourceError(f'The page "{url}" did not contain valid content.')
-    bs = BeautifulSoup(raw_html, 'html.parser')
+    bs = BeautifulSoup(raw_html, "html.parser")
 
     try:
-        source_name = bs.find('h1', attrs={'class', 'page-title page-title-layout1'}).getText()
+        source_name = bs.find(
+            "h1", attrs={"class", "entry-title page-title"}
+        ).getText().strip()
     except Exception as e:
         raise NotANewsSourceError(f'The page "{url}" does not have a name')
 
     try:
-        headings = bs.find_all('h1')
+        headings = bs.find_all("h2")
         images = []
         for heading in headings:
-            images += heading.find_all('img', recursive=True)
+            images += heading.find_all("img", recursive=True)
         image = images[0]
         # images = bs.find_all('img', attrs={'class', 'aligncenter'})
         # image = [i for i in filter(lambda img: img['alt'] != '', images)][0]
         image_url: str = image["src"]
-        image_url = image_url[:image_url.find('?')]
+        image_url = image_url[: image_url.find("?")]
     except Exception as e:
         # print(images)
         # print(e)
         raise NotANewsSourceError(
-            f'The source "{source_name}" with url "{url}" does not contain a left-right bias image.')
+            f'The source "{source_name}" with url "{url}" does not contain a left-right bias image.'
+        )
 
     try:
+
         def _get_factual(text):
-            if 'MIXED' in text:
+            if "MIXED" in text:
                 return Factual.MIXED
-            elif 'HIGH' in text or 'Factual Reporting: High' in text:
+            elif "HIGH" in text or "Factual Reporting: High" in text:
                 return Factual.HIGH
-            elif 'QUESTIONABLE SOURCE' in text:
+            elif "QUESTIONABLE SOURCE" in text:
                 return Factual.QUESTIONABLE
             else:
                 return None
 
-        description = bs.find('meta', property='og:description')['content'].replace('\u00a0', ' ')
+        description = bs.find("meta", property="og:description")["content"].replace(
+            "\u00a0", " "
+        )
         factual = _get_factual(description)
+
+        # find </span>Factual Reporting: <span style="color: #ff6600;">
+        factuality = bs.find("Factual Reporting:")
+        factuality = factuality.find("span").find("strong").getText().strip().upper()
+
 
         factual_text = None
         if factual is None:
-            paragraphs = bs.find_all('p')
+            paragraphs = bs.find_all("p")
             for p in paragraphs:
-                factual_text = p.getText().replace('\u00a0', ' ').lower()
-                if 'factual reporting:' in factual_text:
-                    factual = _get_factual(p.find('span').find('strong').getText().strip().upper())
+                factual_text = p.getText().replace("\u00a0", " ").lower()
+                if "factual reporting:" in factual_text:
+                    factual = _get_factual(
+                        p.find("span").find("strong").getText().strip().upper()
+                    )
                     break
         if factual is None:
             raise Exception()
     except Exception as e:
-        raise NotANewsSourceError(f'Could not find factual information on "{source_name}" with url "{url}"')
+        raise NotANewsSourceError(
+            f'Could not find factual information on "{source_name}" with url "{url}"'
+        )
 
     bias = analyse_left_right_image(left_right_image_from_url(url))
 
-    print(f'Scraping {url} with name "{source_name}", img "{image_url}", and bias {bias}')
-    return Source(name=source_name, img_url=image_url, page_url=url, factual=factual, bias=bias)
+    print(
+        f'Scraping {url} with name "{source_name}", img "{image_url}", and bias {bias}'
+    )
+    return Source(
+        name=source_name, img_url=image_url, page_url=url, factual=factual, bias=bias
+    )
 
 
-def store_sources(sources: List[Source], file_name='sources_file.csv'):
-    with open(file_name, mode='w') as f:
-        writer = csv.writer(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+def store_sources(sources: List[Source], file_name="sources_file.csv"):
+    with open(file_name, mode="w", encoding="utf-8") as f:
+        writer = csv.writer(f, delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL)
 
         for source in sources:
-            writer.writerow([source.name, source.page_url, source.img_url, source.factual, source.bias])
+            writer.writerow(
+                [
+                    source.name,
+                    source.page_url,
+                    source.img_url,
+                    source.factual,
+                    source.bias,
+                ]
+            )
 
 
-def load_sources(file_name='sources_file.csv') -> List[Source]:
+def load_sources(file_name="sources_file.csv") -> List[Source]:
     sources = []
     with open(file_name) as f:
-        reader = csv.reader(f, delimiter=',', quotechar='"', quoting=csv.QUOTE_MINIMAL)
+        reader = csv.reader(f, delimiter=",", quotechar='"', quoting=csv.QUOTE_MINIMAL)
         for row in reader:
-            sources.append(Source(name=row[0], img_url=row[2], page_url=row[1], factual=Factual[row[3].split('.')[1]], bias=int(row[4])))
+            sources.append(
+                Source(
+                    name=row[0],
+                    img_url=row[2],
+                    page_url=row[1],
+                    factual=Factual[row[3].split(".")[1]],
+                    bias=int(row[4]),
+                )
+            )
     return sources
 
 

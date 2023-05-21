@@ -23,7 +23,7 @@ def simple_left_right_bias_percent(sources: List[Source]):
         for number in d.values():
             total += number
         for factual, number in d.items():
-            d[factual] = round(number / total * 100)
+            d[factual] = 0 if number == 0 else round(number / total * 100, 2)
     return biases
 
 
